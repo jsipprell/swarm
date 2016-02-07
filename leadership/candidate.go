@@ -131,6 +131,9 @@ func (c *Candidate) campaign(lock store.Locker) {
 			return
 		case <-lostCh:
 			// We lost the lock. Someone else is the leader, try again.
+			if c.leader {
+				lock.Unlock()
+			}
 		}
 	}
 }
