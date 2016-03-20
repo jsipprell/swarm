@@ -25,7 +25,7 @@ func (nopCloser) Close() error {
 
 var (
 	mockInfo = &dockerclient.Info{
-		ID:              "id",
+		ID:              "test-engine",
 		Name:            "name",
 		NCPU:            10,
 		MemTotal:        20,
@@ -43,7 +43,7 @@ var (
 	engOpts = &cluster.EngineOpts{
 		RefreshMinInterval: time.Duration(30) * time.Second,
 		RefreshMaxInterval: time.Duration(60) * time.Second,
-		RefreshRetry:       3,
+		FailureRetry:       3,
 	}
 )
 

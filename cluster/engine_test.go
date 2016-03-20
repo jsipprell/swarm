@@ -34,9 +34,72 @@ var (
 	engOpts = &EngineOpts{
 		RefreshMinInterval: time.Duration(30) * time.Second,
 		RefreshMaxInterval: time.Duration(60) * time.Second,
-		RefreshRetry:       3,
+		FailureRetry:       3,
 	}
 )
+
+func TestSetEngineState(t *testing.T) {
+	engine := NewEngine("test", 0, engOpts)
+	assert.True(t, engine.state == statePending)
+	engine.setState(stateUnhealthy)
+	assert.True(t, engine.state == stateUnhealthy)
+	engine.setState(stateHealthy)
+	assert.True(t, engine.state == stateHealthy)
+}
+
+func TestErrMsg(t *testing.T) {
+	engine := NewEngine("test", 0, engOpts)
+	assert.True(t, len(engine.ErrMsg()) == 0)
+	message := "cannot connect"
+	engine.setErrMsg(message)
+	assert.True(t, engine.ErrMsg() == message)
+}
+
+func TestCheckConnectionErr(t *testing.T) {
+	engine := NewEngine("test", 0, engOpts)
+	engine.setState(stateHealthy)
+	assert.True(t, engine.failureCount == 0)
+	err := dockerclient.ErrConnectionRefused
+	engine.CheckConnectionErr(err)
+	assert.True(t, len(engine.ErrMsg()) > 0)
+	assert.True(t, engine.failureCount == 1)
+	engine.CheckConnectionErr(err)
+	assert.True(t, engine.failureCount == 2)
+	err = nil
+	engine.CheckConnectionErr(err)
+	assert.True(t, engine.failureCount == 0)
+	assert.True(t, len(engine.ErrMsg()) == 0)
+	// Do not accept random error
+	err = fmt.Errorf("random error")
+	engine.CheckConnectionErr(err)
+	assert.True(t, engine.failureCount == 0)
+	assert.True(t, len(engine.ErrMsg()) == 0)
+}
+
+func TestEngineFailureCount(t *testing.T) {
+	engine := NewEngine("test", 0, engOpts)
+	engine.setState(stateHealthy)
+	for i := 0; i < engine.opts.FailureRetry; i++ {
+		assert.True(t, engine.IsHealthy())
+		engine.incFailureCount()
+	}
+	assert.False(t, engine.IsHealthy())
+	assert.True(t, engine.failureCount == engine.opts.FailureRetry)
+	engine.resetFailureCount()
+	assert.True(t, engine.failureCount == 0)
+}
+
+func TestHealthINdicator(t *testing.T) {
+	engine := NewEngine("test", 0, engOpts)
+	assert.True(t, engine.state == statePending)
+	assert.True(t, engine.HealthIndicator() == 0)
+	engine.setState(stateUnhealthy)
+	assert.True(t, engine.HealthIndicator() == 0)
+	engine.setState(stateHealthy)
+	assert.True(t, engine.HealthIndicator() == 100)
+	engine.incFailureCount()
+	assert.True(t, engine.HealthIndicator() == (int64)(100-100/engine.opts.FailureRetry))
+}
 
 func TestEngineConnectionFailure(t *testing.T) {
 	engine := NewEngine("test", 0, engOpts)
@@ -73,6 +136,7 @@ func TestOutdatedEngine(t *testing.T) {
 
 func TestEngineCpusMemory(t *testing.T) {
 	engine := NewEngine("test", 0, engOpts)
+	engine.setState(stateUnhealthy)
 	assert.False(t, engine.isConnected())
 
 	client := mockclient.NewMockClient()
@@ -96,6 +160,7 @@ func TestEngineCpusMemory(t *testing.T) {
 
 func TestEngineSpecs(t *testing.T) {
 	engine := NewEngine("test", 0, engOpts)
+	engine.setState(stateUnhealthy)
 	assert.False(t, engine.isConnected())
 
 	client := mockclient.NewMockClient()
@@ -124,6 +189,7 @@ func TestEngineSpecs(t *testing.T) {
 
 func TestEngineState(t *testing.T) {
 	engine := NewEngine("test", 0, engOpts)
+	engine.setState(stateUnhealthy)
 	assert.False(t, engine.isConnected())
 
 	client := mockclient.NewMockClient()
@@ -151,7 +217,7 @@ func TestEngineState(t *testing.T) {
 	}
 
 	// Fake an event which will trigger a refresh. The second container will appear.
-	engine.handler(&dockerclient.Event{Id: "two", Status: "created"}, nil)
+	engine.handler(&dockerclient.Event{ID: "two", Status: "created"}, nil)
 	containers = engine.Containers()
 	assert.Len(t, containers, 2)
 	if containers[0].Id != "one" && containers[1].Id != "one" {
@@ -176,6 +242,7 @@ func TestCreateContainer(t *testing.T) {
 		client = mockclient.NewMockClient()
 	)
 
+	engine.setState(stateUnhealthy)
 	client.On("Info").Return(mockInfo, nil)
 	client.On("Version").Return(mockVersion, nil)
 	client.On("StartMonitorEvents", mock.Anything, mock.Anything, mock.Anything).Return()
@@ -233,6 +300,7 @@ func TestCreateContainer(t *testing.T) {
 
 func TestImages(t *testing.T) {
 	engine := NewEngine("test", 0, engOpts)
+	engine.setState(stateHealthy)
 	engine.images = []*Image{
 		{dockerclient.Image{Id: "a"}, engine},
 		{dockerclient.Image{Id: "b"}, engine},
@@ -270,6 +338,7 @@ func TestUsedCpus(t *testing.T) {
 	)
 
 	engine := NewEngine("test", 0, engOpts)
+	engine.setState(stateHealthy)
 	client := mockclient.NewMockClient()
 
 	for _, hn := range hostNcpu {
@@ -303,6 +372,7 @@ func TestContainerRemovedDuringRefresh(t *testing.T) {
 	)
 
 	engine := NewEngine("test", 0, engOpts)
+	engine.setState(stateUnhealthy)
 	assert.False(t, engine.isConnected())
 
 	// A container is removed before it can be inspected.

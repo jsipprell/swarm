@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
 
+load ../../helpers
 load ../mesos_helpers
 
 function teardown() {
@@ -28,6 +29,7 @@ function teardown() {
 	# verify
 	run docker_swarm logs test_container
 	[ "$status" -eq 0 ]
+	[ "${#lines[@]}" -eq 3 ]
 	[[ "${lines[0]}" ==  *"hello world"* ]]
 	[[ "${lines[1]}" ==  *"hello docker"* ]]
 	[[ "${lines[2]}" ==  *"hello swarm"* ]]
